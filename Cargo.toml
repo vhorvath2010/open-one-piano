@@ -1,0 +1,23 @@
+[package]
+name = "open-one-piano"
+version = "0.1.0"
+edition = "2024"
+description = "Change the tone of a The ONE Smart Piano / Light Keyboard from your computer over Bluetooth"
+license = "MIT"
+repository = "https://github.com/vhorvath2010/open-one-piano"
+keywords = ["the-one", "piano", "bluetooth", "midi", "keyboard"]
+categories = ["multimedia::audio", "hardware-support"]
+
+[dependencies]
+btleplug = "0.13.5"
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11"] }
+futures = "0.3.34"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+uuid = "1.29.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
