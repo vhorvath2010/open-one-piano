@@ -1,8 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // no console window on Windows
 
+mod chord_page;
+
+use chord_page::ChordPage;
 use eframe::egui;
 use open_one_piano::ble::{self, Command, Device, Event};
-use open_one_piano::protocol::Tone;
+use open_one_piano::protocol::{LightColor, Tone};
 use open_one_piano::tones::{self, Entry};
 use std::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
@@ -21,6 +24,12 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum Tab {
+    Tones,
+    Chords,
 }
 
 #[derive(PartialEq)]
@@ -50,6 +59,10 @@ struct App {
     search: String,
     status: String,
     error: Option<String>,
+    tab: Tab,
+    chords: ChordPage,
+    /// Lights last sent to the keyboard, so we only send changes.
+    sent_lights: Vec<(u8, LightColor)>,
 }
 
 impl App {
@@ -75,6 +88,18 @@ impl App {
             search: String::new(),
             status: "Looking for keyboards…".into(),
             error: None,
+            tab: if get("tab").as_deref() == Some("chords") {
+                Tab::Chords
+            } else {
+                Tab::Tones
+            },
+            chords: ChordPage::new(
+                get("progression").unwrap_or_else(|| "C G Am F".into()),
+                get("chord_base").and_then(|v| v.parse().ok()).unwrap_or(60),
+                get("keys88").is_some_and(|v| v == "true"),
+                get("chord_lights").is_none_or(|v| v == "true"),
+            ),
+            sent_lights: Vec::new(),
         }
     }
 
@@ -128,7 +153,10 @@ impl App {
                     if self.conn == Conn::Scanning {
                         self.conn = Conn::Idle;
                         match self.devices.len() {
-                            0 => self.status = "No keyboard found. Turn it on, close the ONE phone app, then Scan.".into(),
+                            0 => {
+                                self.status =
+                                    "No keyboard found. Turn it on, then click Scan.".into()
+                            }
                             1 => {
                                 let d = self.devices[0].clone();
                                 self.connect(d);
@@ -138,6 +166,7 @@ impl App {
                     }
                 }
                 Event::Connected(name) => {
+                    self.sent_lights.clear(); // fresh connection: nothing lit yet
                     self.status = format!("Connected to {name}");
                     self.last_device = Some(name.clone());
                     self.conn = Conn::Connected(name);
@@ -149,7 +178,7 @@ impl App {
                         self.model = m.into();
                     }
                     if self.pending.is_some_and(|p| p != s.main) {
-                        self.error = Some("The keyboard didn't accept that tone. Try another tone list (top right).".into());
+                        self.error = Some("The keyboard didn't accept that tone. Try another Tone list (next to the search box).".into());
                     }
                     self.current = Some(s.main);
                     self.pending = None;
@@ -164,6 +193,7 @@ impl App {
                     }
                     self.current = None;
                     self.pending = None;
+                    self.sent_lights.clear();
                 }
                 Event::Error(e) => {
                     if matches!(self.conn, Conn::Connecting | Conn::Scanning) {
@@ -189,57 +219,74 @@ impl App {
             .collect()
     }
 
+    /// Light the current chord's keys while the Chords tab is open; otherwise keep them dark.
+    fn sync_lights(&mut self) {
+        let want: Vec<(u8, LightColor)> =
+            if self.connected() && self.tab == Tab::Chords && self.chords.lights {
+                self.chords
+                    .notes()
+                    .into_iter()
+                    .map(|n| {
+                        (
+                            n,
+                            if self.chords.chord.is_root(n) {
+                                LightColor::Blue
+                            } else {
+                                LightColor::Red
+                            },
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        if want != self.sent_lights && self.connected() {
+            self.send(Command::Lights(want.clone()));
+            self.sent_lights = want;
+        }
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            match &self.conn {
-                Conn::Connected(name) => {
-                    ui.label(egui::RichText::new(format!("Connected: {name}")).color(egui::Color32::from_rgb(70, 180, 100)));
-                    if ui.button("Disconnect").clicked() {
-                        self.send(Command::Disconnect);
-                    }
-                }
-                Conn::Scanning | Conn::Connecting => {
-                    ui.spinner();
-                    ui.label(&self.status);
-                }
-                Conn::Idle => {
-                    let mut pick = None;
-                    egui::ComboBox::from_id_salt("device")
-                        .selected_text(if self.devices.is_empty() { "No keyboards found" } else { "Choose a keyboard" })
-                        .show_ui(ui, |ui| {
-                            for d in &self.devices {
-                                if ui.selectable_label(false, &d.name).clicked() {
-                                    pick = Some(d.clone());
-                                }
-                            }
-                        });
-                    if let Some(d) = pick {
-                        self.connect(d);
-                    }
-                    if ui.button("Scan").clicked() {
-                        self.devices.clear();
-                        self.conn = Conn::Scanning;
-                        self.error = None;
-                        self.send(Command::Scan);
-                    }
-                    ui.label(&self.status);
+        ui.horizontal(|ui| match &self.conn {
+            Conn::Connected(name) => {
+                ui.label(
+                    egui::RichText::new(format!("Connected: {name}"))
+                        .color(egui::Color32::from_rgb(70, 180, 100)),
+                );
+                if ui.button("Disconnect").clicked() {
+                    self.send(Command::Disconnect);
                 }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let before = self.model.clone();
-                egui::ComboBox::from_id_salt("model").selected_text(&self.model).show_ui(ui, |ui| {
-                    for m in tones::MODELS {
-                        ui.selectable_value(&mut self.model, m.to_string(), m);
-                    }
-                });
-                if self.model != before {
-                    self.model_locked = true;
-                    self.category = None;
+            Conn::Scanning | Conn::Connecting => {
+                ui.spinner();
+                ui.label(&self.status);
+            }
+            Conn::Idle => {
+                let mut pick = None;
+                egui::ComboBox::from_id_salt("device")
+                    .selected_text(if self.devices.is_empty() {
+                        "No keyboards found"
+                    } else {
+                        "Choose a keyboard"
+                    })
+                    .show_ui(ui, |ui| {
+                        for d in &self.devices {
+                            if ui.selectable_label(false, &d.name).clicked() {
+                                pick = Some(d.clone());
+                            }
+                        }
+                    });
+                if let Some(d) = pick {
+                    self.connect(d);
                 }
-                ui.label("Tone list").on_hover_text(
-                    "Each ONE model has its own set of tones. This is picked automatically; change it only if tones don't apply.",
-                );
-            });
+                if ui.button("Scan").clicked() {
+                    self.devices.clear();
+                    self.conn = Conn::Scanning;
+                    self.error = None;
+                    self.send(Command::Scan);
+                }
+                ui.label(&self.status);
+            }
         });
         if let Some(e) = &self.error {
             ui.colored_label(egui::Color32::from_rgb(220, 90, 80), e);
@@ -301,8 +348,33 @@ impl eframe::App for App {
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
             self.top_bar(ui);
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                for (tab, label) in [(Tab::Tones, "Tones"), (Tab::Chords, "Chords")] {
+                    let text = egui::RichText::new(label).size(16.0);
+                    if ui
+                        .add(
+                            egui::Button::selectable(self.tab == tab, text)
+                                .min_size(egui::vec2(90.0, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        self.tab = tab;
+                    }
+                }
+            });
             ui.add_space(4.0);
         });
+
+        if self.tab == Tab::Chords {
+            let connected = self.connected();
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.chords.show(ui, connected));
+            });
+            self.sync_lights();
+            return;
+        }
+        self.sync_lights();
 
         let mut categories: Vec<&str> = Vec::new();
         for e in self.list() {
@@ -355,6 +427,21 @@ impl eframe::App for App {
                     }
                 });
                 ui.weak("Double-click or press Enter to change.");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let before = self.model.clone();
+                    egui::ComboBox::from_id_salt("model").selected_text(&self.model).show_ui(ui, |ui| {
+                        for m in tones::MODELS {
+                            ui.selectable_value(&mut self.model, m.to_string(), m);
+                        }
+                    });
+                    if self.model != before {
+                        self.model_locked = true;
+                        self.category = None;
+                    }
+                    ui.weak("Tone list").on_hover_text(
+                        "Each ONE model has its own set of tones. This is picked automatically; change it only if tones don't apply.",
+                    );
+                });
             });
             ui.add_space(4.0);
             egui::ScrollArea::vertical().auto_shrink(false).show_rows(
@@ -395,6 +482,7 @@ impl eframe::App for App {
         });
 
         let enter = ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+        // (Tones tab only: the Chords tab returned above.)
         if enter && let Some(s) = self.selected.filter(|s| Some(*s) != self.current) {
             apply = Some(s);
         }
@@ -409,5 +497,19 @@ impl eframe::App for App {
         }
         eframe::set_value(storage, "model", &self.model);
         eframe::set_value(storage, "model_locked", &self.model_locked.to_string());
+        eframe::set_value(
+            storage,
+            "tab",
+            &(if self.tab == Tab::Chords {
+                "chords"
+            } else {
+                "tones"
+            })
+            .to_string(),
+        );
+        eframe::set_value(storage, "progression", &self.chords.prog_text);
+        eframe::set_value(storage, "chord_base", &self.chords.base.to_string());
+        eframe::set_value(storage, "keys88", &self.chords.keys88.to_string());
+        eframe::set_value(storage, "chord_lights", &self.chords.lights.to_string());
     }
 }

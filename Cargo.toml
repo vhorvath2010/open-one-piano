@@ -1,8 +1,8 @@
 [package]
 name = "open-one-piano"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Change the tone of a The ONE Smart Piano / Light Keyboard from your computer over Bluetooth"
+description = "Change the tone of a The ONE Smart Piano / Light Keyboard and light up chords on its keys, from your computer over Bluetooth"
 license = "MIT"
 repository = "https://github.com/vhorvath2010/open-one-piano"
 keywords = ["the-one", "piano", "bluetooth", "midi", "keyboard"]

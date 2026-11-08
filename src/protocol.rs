@@ -68,6 +68,35 @@ pub fn select_tone(layer: Layer, tone: Tone) -> Vec<u8> {
     ])
 }
 
+/// Key light colors. Single-color keyboards (like the ONE Piano COLOR) show both as red.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LightColor {
+    Red = 1,
+    Blue = 2,
+}
+
+/// Lights are numbered from the bottom key of an 88-key piano (A0, MIDI note 21),
+/// whatever the keyboard's size.
+fn light_index(note: u8) -> u8 {
+    note.saturating_sub(21) & 0x7F
+}
+
+/// Light one key (MIDI note number). This is a Polyphonic Key Pressure message on
+/// MIDI channel 3 whose "note" is the light number, not SysEx.
+pub fn light_on(note: u8, color: LightColor) -> Vec<u8> {
+    vec![0x80, 0x80, 0xA2, light_index(note), color as u8]
+}
+
+/// Turn one key's light off.
+pub fn light_off(note: u8) -> Vec<u8> {
+    vec![0x80, 0x80, 0xA2, light_index(note), 0x00]
+}
+
+/// Turn every key's light off.
+pub fn lights_all_off() -> Vec<u8> {
+    sysex_packet(&[0x16, 0x02, 0x00])
+}
+
 /// The parts of the settings reply we use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -194,6 +223,19 @@ mod tests {
                     prog: 4
                 }
             })]
+        );
+    }
+
+    #[test]
+    fn builds_light_commands() {
+        // Middle C (MIDI 60) is light 39.
+        assert_eq!(light_on(60, LightColor::Red), [0x80, 0x80, 0xA2, 39, 1]);
+        assert_eq!(light_off(60), [0x80, 0x80, 0xA2, 39, 0]);
+        assert_eq!(
+            lights_all_off(),
+            [
+                0x80, 0x80, 0xF0, 0x00, 0x20, 0x2B, 0x69, 0x16, 0x02, 0x00, 0xF7
+            ]
         );
     }
 

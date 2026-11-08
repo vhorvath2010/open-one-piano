@@ -1,12 +1,12 @@
 //! Bluetooth worker: owns the BLE connection on a background thread so the UI never blocks.
 
-use crate::protocol::{self, Layer, Reply, Tone};
+use crate::protocol::{self, Layer, LightColor, Reply, Tone};
 use btleplug::api::{
     Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -22,6 +22,8 @@ pub enum Command {
     Scan,
     Connect(Device),
     SetTone(Tone),
+    /// Light exactly these keys (MIDI note → color); every other key goes dark.
+    Lights(Vec<(u8, LightColor)>),
     Disconnect,
 }
 
@@ -41,6 +43,8 @@ struct Link {
     peripheral: Peripheral,
     midi: Characteristic,
     task: tokio::task::JoinHandle<()>,
+    /// Keys currently lit, so a new chord only touches the keys that change.
+    lit: HashMap<u8, LightColor>,
 }
 
 /// Start the worker. `notify` is called after every event so the UI can repaint.
@@ -96,6 +100,10 @@ async fn run(mut rx: UnboundedReceiver<Command>, emit: Emit) {
             Command::SetTone(tone) => match &link {
                 Some(l) => set_tone(l, tone).await,
                 None => Err("Not connected".into()),
+            },
+            Command::Lights(keys) => match link.as_mut() {
+                Some(l) => set_lights(l, keys).await,
+                None => Ok(()), // nothing to light; not worth an error
             },
             Command::Disconnect => {
                 drop_link(&mut link).await;
@@ -214,9 +222,11 @@ async fn connect(adapter: &Adapter, dev: &Device, emit: Emit) -> Result<Link, St
         peripheral,
         midi,
         task,
+        lit: HashMap::new(),
     };
     write(&link, &protocol::hello()).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
+    write(&link, &protocol::lights_all_off()).await?;
     write(&link, &protocol::query_settings()).await?;
     Ok(link)
 }
@@ -251,8 +261,30 @@ async fn write(link: &Link, data: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("Couldn't send to the keyboard: {e}"))
 }
 
+async fn set_lights(link: &mut Link, keys: Vec<(u8, LightColor)>) -> Result<(), String> {
+    let want: HashMap<u8, LightColor> = keys.into_iter().collect();
+    let off: Vec<u8> = link
+        .lit
+        .keys()
+        .filter(|n| !want.contains_key(n))
+        .copied()
+        .collect();
+    for n in off {
+        write(link, &protocol::light_off(n)).await?;
+        link.lit.remove(&n);
+    }
+    for (&n, &c) in &want {
+        if link.lit.get(&n) != Some(&c) {
+            write(link, &protocol::light_on(n, c)).await?;
+            link.lit.insert(n, c);
+        }
+    }
+    Ok(())
+}
+
 async fn drop_link(link: &mut Option<Link>) {
     if let Some(l) = link.take() {
+        let _ = write(&l, &protocol::lights_all_off()).await;
         l.task.abort();
         let _ = l.peripheral.disconnect().await;
     }

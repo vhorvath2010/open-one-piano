@@ -49,6 +49,21 @@ F0 00 20 2B 69 06 00 00 01 F7
 F0 00 20 2B 69 06 01 00 10 00 04 F7
 ```
 
+### Key lights
+
+Lights use plain MIDI, not SysEx:
+
+| Purpose | Send |
+| --- | --- |
+| Light one key | `A2 <light> <color>` (Polyphonic Key Pressure, MIDI channel 3) |
+| Turn one key's light off | `A2 <light> 00` |
+| Turn every light off | SysEx `16 02 00` |
+| Turn every light on | SysEx `16 02 <color>` |
+
+`<light>` is the key's MIDI note **minus 21**: lights are numbered from the bottom key of an 88-key piano (A0), whatever the keyboard's size. Middle C (MIDI 60) is light 39.
+
+`<color>` is `1` for red and `2` for blue. Keyboards with single-color LEDs, like the ONE Piano COLOR, show both as red.
+
 ### Settings reply
 
 The data after `5D 01` (at least 25 bytes). The fields this app uses:
