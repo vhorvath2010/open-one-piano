@@ -109,13 +109,21 @@ pub struct Settings {
 pub enum Reply {
     Hello,
     Settings(Settings),
+    /// A key went down (`on`) or up. MIDI note number.
+    Note {
+        note: u8,
+        on: bool,
+    },
+    /// Sustain pedal pressed or released.
+    Pedal(bool),
 }
 
-/// Pull complete SysEx messages out of a BLE MIDI notification and recognise our replies.
-/// Note and controller messages from the keys are ignored.
+/// Decode a BLE MIDI notification: the keys being played, the sustain pedal,
+/// and the keyboard's SysEx replies. Handles timestamps and running status.
 pub fn parse_notification(packet: &[u8]) -> Vec<Reply> {
     let mut out = Vec::new();
     let mut i = 1; // skip packet header byte
+    let mut running: Option<u8> = None;
     let mut sysex: Option<Vec<u8>> = None;
     while i < packet.len() {
         let b = packet[i];
@@ -136,12 +144,40 @@ pub fn parse_notification(packet: &[u8]) -> Vec<Reply> {
             i += 1;
             continue;
         }
-        if b & 0x80 != 0 && packet.get(i + 1) == Some(&0xF0) {
-            sysex = Some(Vec::new());
-            i += 2;
+        if b & 0x80 != 0 {
+            // A timestamp byte, optionally followed by a status byte.
+            i += 1;
+            if let Some(&status) = packet.get(i).filter(|s| *s & 0x80 != 0) {
+                i += 1;
+                match status {
+                    0xF0 => sysex = Some(Vec::new()),
+                    0xF8.. => {} // real-time: doesn't affect running status
+                    0xF1..=0xF7 => running = None, // other system messages: not used here
+                    _ => running = Some(status),
+                }
+            }
             continue;
         }
-        i += 1;
+        // Data bytes for the running status.
+        let Some(status) = running else {
+            i += 1;
+            continue;
+        };
+        let len = if matches!(status & 0xF0, 0xC0 | 0xD0) {
+            1
+        } else {
+            2
+        };
+        let Some(data) = packet.get(i..i + len) else {
+            break;
+        };
+        match (status & 0xF0, data) {
+            (0x90, &[note, vel]) => out.push(Reply::Note { note, on: vel > 0 }),
+            (0x80, &[note, _]) => out.push(Reply::Note { note, on: false }),
+            (0xB0, &[64, value]) => out.push(Reply::Pedal(value >= 64)),
+            _ => {}
+        }
+        i += len;
     }
     out
 }
@@ -240,7 +276,40 @@ mod tests {
     }
 
     #[test]
-    fn ignores_key_presses() {
-        assert!(parse_notification(&[0xA1, 0x80, 0x90, 0x3E, 0x40]).is_empty());
+    fn parses_key_presses() {
+        // Captured: D4 released, then G4 pressed.
+        assert_eq!(
+            parse_notification(&[0xA1, 0x80, 0x90, 0x3E, 0x00]),
+            vec![Reply::Note {
+                note: 62,
+                on: false
+            }]
+        );
+        assert_eq!(
+            parse_notification(&[0xA2, 0xB4, 0x90, 0x43, 0x64]),
+            vec![Reply::Note { note: 67, on: true }]
+        );
+        // Three keys in one packet: running status, with and without timestamps.
+        assert_eq!(
+            parse_notification(&[0x80, 0x81, 0x90, 60, 100, 64, 90, 0x82, 67, 80]),
+            vec![
+                Reply::Note { note: 60, on: true },
+                Reply::Note { note: 64, on: true },
+                Reply::Note { note: 67, on: true },
+            ]
+        );
+        // Sustain pedal down, a Note Off, then the bank-select echo is ignored.
+        assert_eq!(
+            parse_notification(&[
+                0x80, 0x81, 0xB0, 64, 127, 0x81, 0x80, 60, 0, 0x81, 0xB0, 0x00, 0x10
+            ]),
+            vec![
+                Reply::Pedal(true),
+                Reply::Note {
+                    note: 60,
+                    on: false
+                }
+            ]
+        );
     }
 }

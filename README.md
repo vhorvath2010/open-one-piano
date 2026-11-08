@@ -1,17 +1,18 @@
 # Open ONE Piano
 
-**Change the tone (instrument / voice / sound) of a The ONE Smart Piano or ONE Light Keyboard from your computer, and light up chords on its keys — no phone app needed.**
+**Change the tone (instrument / voice / sound) of a The ONE Smart Piano or ONE Light Keyboard from your computer, light up chords and scales on its keys, and see the names of the chords you play — no phone app needed.**
 
-Open ONE Piano is a small, free, open-source desktop app for Windows, macOS and Linux. It connects to your The ONE keyboard over Bluetooth and does two things:
+Open ONE Piano is a small, free, open-source desktop app for Windows, macOS and Linux. It connects to your The ONE keyboard over Bluetooth and does three things:
 
 - **Tones:** pick any of the keyboard's built-in tones — grand pianos, electric pianos, organs, strings, synths, drums and hundreds more — from a searchable list, and the keys you play switch to it.
-- **Chord shower:** pick a chord (any root, 18 chord types, any inversion) or type a progression like `C G Am F`, and the keys for each chord light up on your keyboard so you can see where to put your fingers.
+- **Highlight chords and scales:** pick a chord (any root, 18 chord types, any inversion), type a progression like `C G Am F`, or pick a scale (major, minor, pentatonic, blues, modes…), and the keys light up on your keyboard so you can see where to put your fingers.
+- **Live chord names:** play, and the app shows the keys you're holding and names the chord, including inversions and slash chords like `C/E`. It keeps a list of the chords you played.
 
 It does the same thing as the tone settings in the official "Smart Piano" phone app, using the keyboard's own Bluetooth MIDI commands. The window always shows the tone the keyboard is actually playing, read back from the keyboard itself.
 
-| Tones | Chords |
-| --- | --- |
-| ![Tones page](docs/screenshot.png) | ![Chords page](docs/chords.png) |
+| Tones | Highlight | Live |
+| --- | --- | --- |
+| ![Tones page](docs/screenshot.png) | ![Highlight page](docs/chords.png) | ![Live page](docs/live.png) |
 
 ## Download
 
@@ -32,7 +33,9 @@ The macOS app isn't notarized: the first time, right-click it and choose **Open*
 2. **Close the ONE app on your phone** (or turn off your phone's Bluetooth). The keyboard only accepts one Bluetooth connection at a time.
 3. Open Open ONE Piano. It finds your keyboard and connects on its own; next time it reconnects to the same keyboard automatically.
 4. **Tones:** the top of the window shows the tone that's playing now. Pick another tone from the list (use the categories, the search box, or **Prev / Next**), then press **Change tone**. Double-clicking a tone or pressing **Enter** works too.
-5. **Chords:** pick a root and a chord type, and choose the inversion and octave. The chord's keys light up on your keyboard and on the drawing in the app; the root is shown in blue (on keyboards with blue LEDs). To practice a song, type its chords into **Progression** (for example `C G Am F` or `Dm7 G7 Cmaj7`, slash chords like `D/F#` work too) and step through them with the chord buttons or the **Left / Right** arrow keys.
+5. **Highlight → Chord:** pick a root and a chord type, and choose the inversion and octave. The chord's keys light up on your keyboard and on the drawing in the app; the root is shown in blue (on keyboards with blue LEDs). To practice a song, type its chords into **Progression** (for example `C G Am F` or `Dm7 G7 Cmaj7`, slash chords like `D/F#` work too) and step through them with the chord buttons or the **Left / Right** arrow keys.
+6. **Highlight → Scale:** pick a root and a scale. It lights one octave starting at the chosen octave, or every key in the scale with **Whole keyboard** turned on.
+7. **Live:** just play. The chord you're holding is named at the top and drawn on the keyboard, with the root in blue. With **Count notes held by the pedal** on, notes still ringing from the sustain pedal count too, so arpeggios work. **What you played** lists each chord as you lift your hands.
 
 ## Supported keyboards
 
@@ -48,7 +51,7 @@ The macOS and Linux builds compile and pass the tests in CI but haven't been tri
 ## Troubleshooting
 
 - **"No keyboard found"**: make sure Bluetooth is on, the keyboard is on (it switches itself off after a while), and the phone app isn't connected to it. Then click **Scan**.
-- **Lights are on the wrong keys**: if you have an 88-key piano, set **88 keys** on the Chords page so chords are placed on keys you have.
+- **Lights are on the wrong keys**: if you have an 88-key piano, set **88 keys** on the Highlight page so chords are placed on keys you have.
 - **The keys stopped making sound**: the main tone layer was switched off. Change to any tone in the app and it switches back on.
 - **"The keyboard didn't accept that tone"**: the wrong tone list is selected for your model. Try another one under **Tone list**, next to the search box.
 - **Linux**: you need BlueZ running, and your user needs access to Bluetooth (usually the case on desktop distros).

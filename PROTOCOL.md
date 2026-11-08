@@ -64,6 +64,10 @@ Lights use plain MIDI, not SysEx:
 
 `<color>` is `1` for red and `2` for blue. Keyboards with single-color LEDs, like the ONE Piano COLOR, show both as red.
 
+### Keys being played
+
+The keyboard sends standard MIDI for what you play: Note On (`90 <note> <velocity>`, velocity 0 meaning released), Note Off (`80 <note> <velocity>`), and the sustain pedal as Control Change 64 (`B0 40 <value>`, 64 and up meaning down). Several messages often share one BLE packet using running status.
+
 ### Settings reply
 
 The data after `5D 01` (at least 25 bytes). The fields this app uses:

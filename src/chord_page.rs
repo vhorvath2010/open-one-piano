@@ -1,16 +1,27 @@
-//! The "Chords" page: pick or step through chords, see them on a drawn keyboard,
-//! and light the matching keys on the real keyboard.
+//! The "Highlight" page: pick a chord or a scale (or step through a progression),
+//! see it on a drawn keyboard, and light the matching keys on the real keyboard.
 
 use eframe::egui::{
     self, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, vec2,
 };
-use open_one_piano::chords::{self, Chord, NOTE_NAMES, QUALITIES};
+use open_one_piano::chords::{self, Chord, NOTE_NAMES, QUALITIES, SCALES};
 
 const ROOT_COLOR: Color32 = Color32::from_rgb(70, 130, 230);
 const NOTE_COLOR: Color32 = Color32::from_rgb(225, 75, 65);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Chord,
+    Scale,
+}
+
 pub struct ChordPage {
+    pub mode: Mode,
     pub chord: Chord,
+    /// Index into SCALES for scale mode (the root is `chord.root`).
+    pub scale: usize,
+    /// Scale mode: light the scale on every key instead of one octave.
+    pub whole_keyboard: bool,
     /// MIDI note of the C the chord is built from (60 = middle C).
     pub base: u8,
     pub keys88: bool,
@@ -24,7 +35,10 @@ pub struct ChordPage {
 impl ChordPage {
     pub fn new(prog_text: String, base: u8, keys88: bool, lights: bool) -> Self {
         let mut p = ChordPage {
+            mode: Mode::Chord,
             chord: Chord::new(0, 0),
+            scale: 0,
+            whole_keyboard: false,
             base,
             keys88,
             lights,
@@ -42,7 +56,16 @@ impl ChordPage {
     }
 
     pub fn notes(&self) -> Vec<u8> {
-        self.chord.notes(self.base, self.range())
+        match self.mode {
+            Mode::Chord => self.chord.notes(self.base, self.range()),
+            Mode::Scale => chords::scale_notes(
+                self.chord.root,
+                &SCALES[self.scale.min(SCALES.len() - 1)],
+                self.base,
+                self.range(),
+                self.whole_keyboard,
+            ),
+        }
     }
 
     fn reparse(&mut self) {
@@ -76,7 +99,7 @@ impl ChordPage {
     pub fn show(&mut self, ui: &mut egui::Ui, connected: bool) {
         // Arrow keys step through the progression unless a text box has focus.
         let typing = ui.ctx().memory(|m| m.focused().is_some());
-        if !typing {
+        if !typing && self.mode == Mode::Chord {
             let (l, r) = ui.ctx().input(|i| {
                 (
                     i.key_pressed(egui::Key::ArrowLeft),
@@ -91,21 +114,48 @@ impl ChordPage {
             }
         }
 
-        let notes = self.notes();
+        ui.horizontal(|ui| {
+            for (mode, label) in [(Mode::Chord, "Chord"), (Mode::Scale, "Scale")] {
+                let b =
+                    egui::Button::selectable(self.mode == mode, label).min_size(vec2(70.0, 24.0));
+                if ui.add(b).clicked() {
+                    self.mode = mode;
+                }
+            }
+        });
+        ui.add_space(4.0);
 
-        // Big chord readout
+        let notes = self.notes();
+        let scale = &SCALES[self.scale.min(SCALES.len() - 1)];
+        let root_name = NOTE_NAMES[self.chord.root as usize];
+        let (title, subtitle) = match self.mode {
+            Mode::Chord => (self.chord.symbol(), self.chord.long_name()),
+            Mode::Scale => (
+                format!("{root_name} {}", scale.name),
+                if self.whole_keyboard {
+                    "Scale, whole keyboard".to_string()
+                } else {
+                    "Scale, one octave".to_string()
+                },
+            ),
+        };
+        let mut seen = Vec::new();
+        for &n in &notes {
+            if !seen.contains(&(n % 12)) {
+                seen.push(n % 12);
+            }
+        }
+        let names: Vec<&str> = seen.iter().map(|&pc| NOTE_NAMES[pc as usize]).collect();
+
+        // Big readout
         egui::Frame::group(ui.style())
             .inner_margin(12.0)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(self.chord.symbol()).size(30.0).strong());
-                        ui.label(self.chord.long_name());
-                        let names: Vec<&str> = notes
-                            .iter()
-                            .map(|&n| NOTE_NAMES[(n % 12) as usize])
-                            .collect();
+                        ui.label(RichText::new(&title).size(30.0).strong());
+                        ui.label(&subtitle);
                         ui.weak(names.join("  "));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -138,49 +188,73 @@ impl ChordPage {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Type").strong());
             ui.add_space(8.0);
-            for (i, q) in QUALITIES.iter().enumerate() {
-                if ui
-                    .add(egui::Button::selectable(self.chord.quality == i, q.name))
-                    .clicked()
-                {
-                    self.chord.quality = i;
-                    self.chord.inversion %= q.intervals.len();
-                    self.index = None;
+            match self.mode {
+                Mode::Chord => {
+                    for (i, q) in QUALITIES.iter().enumerate() {
+                        if ui
+                            .add(egui::Button::selectable(self.chord.quality == i, q.name))
+                            .clicked()
+                        {
+                            self.chord.quality = i;
+                            self.chord.inversion %= q.intervals.len();
+                            self.index = None;
+                        }
+                    }
+                }
+                Mode::Scale => {
+                    for (i, sc) in SCALES.iter().enumerate() {
+                        if ui
+                            .add(egui::Button::selectable(self.scale == i, sc.name))
+                            .clicked()
+                        {
+                            self.scale = i;
+                        }
+                    }
                 }
             }
         });
         // Inversion, octave, keyboard size
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Inversion").strong());
-            let n = self.chord.q().intervals.len();
-            for (i, label) in ["Root", "1st", "2nd", "3rd", "4th"]
-                .iter()
-                .enumerate()
-                .take(n)
-            {
-                if ui
-                    .add(egui::Button::selectable(self.chord.inversion == i, *label))
-                    .clicked()
-                {
-                    self.chord.inversion = i;
+            match self.mode {
+                Mode::Chord => {
+                    ui.label(RichText::new("Inversion").strong());
+                    let n = self.chord.q().intervals.len();
+                    for (i, label) in ["Root", "1st", "2nd", "3rd", "4th"]
+                        .iter()
+                        .enumerate()
+                        .take(n)
+                    {
+                        if ui
+                            .add(egui::Button::selectable(self.chord.inversion == i, *label))
+                            .clicked()
+                        {
+                            self.chord.inversion = i;
+                        }
+                    }
+                }
+                Mode::Scale => {
+                    ui.checkbox(&mut self.whole_keyboard, "Whole keyboard");
                 }
             }
             ui.add_space(16.0);
-            ui.label(RichText::new("Octave").strong());
-            let (lo, hi) = self.range();
-            if ui
-                .add_enabled(self.base >= lo + 12, egui::Button::new("<"))
-                .clicked()
-            {
-                self.base -= 12;
-            }
-            ui.label(format!("C{}", self.base / 12 - 1));
-            if ui
-                .add_enabled(self.base + 12 <= hi - 12, egui::Button::new(">"))
-                .clicked()
-            {
-                self.base += 12;
-            }
+            let octave_matters = !(self.mode == Mode::Scale && self.whole_keyboard);
+            ui.add_enabled_ui(octave_matters, |ui| {
+                ui.label(RichText::new("Octave").strong());
+                let (lo, hi) = self.range();
+                if ui
+                    .add_enabled(self.base >= lo + 12, egui::Button::new("<"))
+                    .clicked()
+                {
+                    self.base -= 12;
+                }
+                ui.label(format!("C{}", self.base / 12 - 1));
+                if ui
+                    .add_enabled(self.base + 12 <= hi - 12, egui::Button::new(">"))
+                    .clicked()
+                {
+                    self.base += 12;
+                }
+            });
             ui.add_space(16.0);
             egui::ComboBox::from_id_salt("keys")
                 .selected_text(if self.keys88 { "88 keys" } else { "61 keys" })
@@ -193,6 +267,9 @@ impl ChordPage {
 
         draw_keyboard(ui, self.range(), &notes, |n| self.chord.is_root(n));
         ui.add_space(10.0);
+        if self.mode == Mode::Scale {
+            return;
+        }
 
         // Progression
         ui.horizontal(|ui| {
@@ -250,7 +327,12 @@ fn note_label(n: u8) -> String {
     format!("{}{}", NOTE_NAMES[(n % 12) as usize], n / 12 - 1)
 }
 
-fn draw_keyboard(ui: &mut egui::Ui, (lo, hi): (u8, u8), lit: &[u8], is_root: impl Fn(u8) -> bool) {
+pub fn draw_keyboard(
+    ui: &mut egui::Ui,
+    (lo, hi): (u8, u8),
+    lit: &[u8],
+    is_root: impl Fn(u8) -> bool,
+) {
     let whites: Vec<u8> = (lo..=hi).filter(|&n| !is_black(n)).collect();
     let width = ui.available_width();
     let height = (width / whites.len() as f32 * 5.5).clamp(70.0, 130.0);

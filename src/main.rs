@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // no console window on Windows
 
 mod chord_page;
+mod live_page;
 
-use chord_page::ChordPage;
+use chord_page::{ChordPage, Mode};
 use eframe::egui;
+use live_page::LivePage;
 use open_one_piano::ble::{self, Command, Device, Event};
 use open_one_piano::protocol::{LightColor, Tone};
 use open_one_piano::tones::{self, Entry};
@@ -30,6 +32,7 @@ fn main() -> eframe::Result {
 enum Tab {
     Tones,
     Chords,
+    Live,
 }
 
 #[derive(PartialEq)]
@@ -61,6 +64,7 @@ struct App {
     error: Option<String>,
     tab: Tab,
     chords: ChordPage,
+    live: LivePage,
     /// Lights last sent to the keyboard, so we only send changes.
     sent_lights: Vec<(u8, LightColor)>,
 }
@@ -73,6 +77,17 @@ impl App {
         let storage = cc.storage;
         let get = |k: &str| storage.and_then(|s| eframe::get_value::<String>(s, k));
         let _ = cmd.send(Command::Scan);
+        let mut chords = ChordPage::new(
+            get("progression").unwrap_or_else(|| "C G Am F".into()),
+            get("chord_base").and_then(|v| v.parse().ok()).unwrap_or(60),
+            get("keys88").is_some_and(|v| v == "true"),
+            get("chord_lights").is_none_or(|v| v == "true"),
+        );
+        if get("highlight_mode").as_deref() == Some("scale") {
+            chords.mode = Mode::Scale;
+        }
+        chords.scale = get("scale").and_then(|v| v.parse().ok()).unwrap_or(0);
+        chords.whole_keyboard = get("whole_keyboard").is_some_and(|v| v == "true");
         Self {
             cmd,
             events: ev_rx,
@@ -88,17 +103,13 @@ impl App {
             search: String::new(),
             status: "Looking for keyboards…".into(),
             error: None,
-            tab: if get("tab").as_deref() == Some("chords") {
-                Tab::Chords
-            } else {
-                Tab::Tones
+            tab: match get("tab").as_deref() {
+                Some("chords") => Tab::Chords,
+                Some("live") => Tab::Live,
+                _ => Tab::Tones,
             },
-            chords: ChordPage::new(
-                get("progression").unwrap_or_else(|| "C G Am F".into()),
-                get("chord_base").and_then(|v| v.parse().ok()).unwrap_or(60),
-                get("keys88").is_some_and(|v| v == "true"),
-                get("chord_lights").is_none_or(|v| v == "true"),
-            ),
+            chords,
+            live: LivePage::new(get("use_pedal").is_none_or(|v| v == "true")),
             sent_lights: Vec::new(),
         }
     }
@@ -194,7 +205,10 @@ impl App {
                     self.current = None;
                     self.pending = None;
                     self.sent_lights.clear();
+                    self.live.clear();
                 }
+                Event::Note { note, on } => self.live.on_note(note, on),
+                Event::Pedal(down) => self.live.on_pedal(down),
                 Event::Error(e) => {
                     if matches!(self.conn, Conn::Connecting | Conn::Scanning) {
                         self.conn = Conn::Idle;
@@ -350,7 +364,11 @@ impl eframe::App for App {
             self.top_bar(ui);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                for (tab, label) in [(Tab::Tones, "Tones"), (Tab::Chords, "Chords")] {
+                for (tab, label) in [
+                    (Tab::Tones, "Tones"),
+                    (Tab::Chords, "Highlight"),
+                    (Tab::Live, "Live"),
+                ] {
                     let text = egui::RichText::new(label).size(16.0);
                     if ui
                         .add(
@@ -370,6 +388,15 @@ impl eframe::App for App {
             let connected = self.connected();
             egui::CentralPanel::default().show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.chords.show(ui, connected));
+            });
+            self.sync_lights();
+            return;
+        }
+        if self.tab == Tab::Live {
+            let connected = self.connected();
+            let range = self.chords.range();
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.live.show(ui, range, connected));
             });
             self.sync_lights();
             return;
@@ -497,16 +524,29 @@ impl eframe::App for App {
         }
         eframe::set_value(storage, "model", &self.model);
         eframe::set_value(storage, "model_locked", &self.model_locked.to_string());
+        let tab = match self.tab {
+            Tab::Tones => "tones",
+            Tab::Chords => "chords",
+            Tab::Live => "live",
+        };
+        eframe::set_value(storage, "tab", &tab.to_string());
         eframe::set_value(
             storage,
-            "tab",
-            &(if self.tab == Tab::Chords {
-                "chords"
+            "highlight_mode",
+            &(if self.chords.mode == Mode::Scale {
+                "scale"
             } else {
-                "tones"
+                "chord"
             })
             .to_string(),
         );
+        eframe::set_value(storage, "scale", &self.chords.scale.to_string());
+        eframe::set_value(
+            storage,
+            "whole_keyboard",
+            &self.chords.whole_keyboard.to_string(),
+        );
+        eframe::set_value(storage, "use_pedal", &self.live.use_pedal.to_string());
         eframe::set_value(storage, "progression", &self.chords.prog_text);
         eframe::set_value(storage, "chord_base", &self.chords.base.to_string());
         eframe::set_value(storage, "keys88", &self.chords.keys88.to_string());

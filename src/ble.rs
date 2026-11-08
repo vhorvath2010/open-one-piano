@@ -33,6 +33,12 @@ pub enum Event {
     ScanDone,
     Connected(String),
     Settings(protocol::Settings),
+    /// A key went down or up on the keyboard.
+    Note {
+        note: u8,
+        on: bool,
+    },
+    Pedal(bool),
     Disconnected,
     Error(String),
 }
@@ -213,6 +219,8 @@ async fn connect(adapter: &Adapter, dev: &Device, emit: Emit) -> Result<Link, St
                 match reply {
                     Reply::Hello => {}
                     Reply::Settings(s) => emit(Event::Settings(s)),
+                    Reply::Note { note, on } => emit(Event::Note { note, on }),
+                    Reply::Pedal(down) => emit(Event::Pedal(down)),
                 }
             }
         }

@@ -286,6 +286,168 @@ pub fn parse_progression(text: &str) -> (Vec<Chord>, Vec<String>) {
     (chords, bad)
 }
 
+/// Name the chord formed by the notes being held, e.g. [64, 67, 72] → C/E.
+/// Returns None for single notes and note clusters that aren't a known chord.
+pub fn identify(notes: &[u8]) -> Option<Chord> {
+    let bass = *notes.iter().min()? % 12;
+    let mut pcs: Vec<u8> = notes.iter().map(|n| n % 12).collect();
+    pcs.sort_unstable();
+    pcs.dedup();
+    if pcs.len() < 2 {
+        return None;
+    }
+    let set = |v: &[u8]| -> u16 { v.iter().fold(0u16, |m, &p| m | 1 << (p % 12)) };
+    let held = set(&pcs);
+
+    // (how good the match is, root isn't the bass, quality order) → lower is better
+    let mut best: Option<((u8, bool, usize), Chord)> = None;
+    for &root in &pcs {
+        let rel = |m: u16| -> u16 { ((m >> root) | (m << (12 - root))) & 0xFFF };
+        let held_rel = rel(held);
+        let bass_rel = 1u16 << ((bass + 12 - root) % 12);
+        for (qi, q) in QUALITIES.iter().enumerate() {
+            let shape = set(q.intervals);
+            if q.suffix == "5" && pcs.len() != 2 {
+                continue; // power chord only for bare fifths
+            }
+            let score = if held_rel == shape {
+                0
+            } else if q.intervals.len() >= 4 && shape & 1 << 7 != 0 && held_rel == shape & !(1 << 7)
+            {
+                1 // seventh/ninth chord with the fifth left out
+            } else if bass_rel & shape == 0 && held_rel & !bass_rel == shape {
+                2 // chord over a different bass note
+            } else {
+                continue;
+            };
+            let key = (score, root != bass, qi);
+            if best.as_ref().is_none_or(|(k, _)| key < *k) {
+                let chord = Chord {
+                    root,
+                    quality: qi,
+                    inversion: 0,
+                    bass: (root != bass).then_some(bass),
+                };
+                best = Some((key, chord));
+            }
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
+/// Name of the interval between two notes, for when only two keys are held.
+pub fn interval_name(a: u8, b: u8) -> &'static str {
+    const NAMES: [&str; 12] = [
+        "Octave",
+        "Minor 2nd",
+        "Major 2nd",
+        "Minor 3rd",
+        "Major 3rd",
+        "Perfect 4th",
+        "Tritone",
+        "Perfect 5th",
+        "Minor 6th",
+        "Major 6th",
+        "Minor 7th",
+        "Major 7th",
+    ];
+    NAMES[(a.abs_diff(b) % 12) as usize]
+}
+
+pub fn note_name(n: u8) -> String {
+    format!("{}{}", NOTE_NAMES[(n % 12) as usize], n / 12 - 1)
+}
+
+/// A scale: name and semitones above the root within one octave.
+pub struct Scale {
+    pub name: &'static str,
+    pub intervals: &'static [u8],
+}
+
+pub const SCALES: &[Scale] = &[
+    Scale {
+        name: "Major",
+        intervals: &[0, 2, 4, 5, 7, 9, 11],
+    },
+    Scale {
+        name: "Natural minor",
+        intervals: &[0, 2, 3, 5, 7, 8, 10],
+    },
+    Scale {
+        name: "Harmonic minor",
+        intervals: &[0, 2, 3, 5, 7, 8, 11],
+    },
+    Scale {
+        name: "Melodic minor",
+        intervals: &[0, 2, 3, 5, 7, 9, 11],
+    },
+    Scale {
+        name: "Major pentatonic",
+        intervals: &[0, 2, 4, 7, 9],
+    },
+    Scale {
+        name: "Minor pentatonic",
+        intervals: &[0, 3, 5, 7, 10],
+    },
+    Scale {
+        name: "Blues",
+        intervals: &[0, 3, 5, 6, 7, 10],
+    },
+    Scale {
+        name: "Dorian",
+        intervals: &[0, 2, 3, 5, 7, 9, 10],
+    },
+    Scale {
+        name: "Phrygian",
+        intervals: &[0, 1, 3, 5, 7, 8, 10],
+    },
+    Scale {
+        name: "Lydian",
+        intervals: &[0, 2, 4, 6, 7, 9, 11],
+    },
+    Scale {
+        name: "Mixolydian",
+        intervals: &[0, 2, 4, 5, 7, 9, 10],
+    },
+    Scale {
+        name: "Locrian",
+        intervals: &[0, 1, 3, 5, 6, 8, 10],
+    },
+    Scale {
+        name: "Whole tone",
+        intervals: &[0, 2, 4, 6, 8, 10],
+    },
+    Scale {
+        name: "Chromatic",
+        intervals: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    },
+];
+
+/// Keys of a scale. With `whole_keyboard`, every key in `range` that's in the scale;
+/// otherwise one octave going up from the root at `base` (including the top root).
+pub fn scale_notes(
+    root: u8,
+    scale: &Scale,
+    base: u8,
+    range: (u8, u8),
+    whole_keyboard: bool,
+) -> Vec<u8> {
+    let (lo, hi) = range;
+    if whole_keyboard {
+        return (lo..=hi)
+            .filter(|n| scale.intervals.contains(&((n + 12 - root % 12) % 12)))
+            .collect();
+    }
+    let start = base + root % 12;
+    scale
+        .intervals
+        .iter()
+        .map(|i| start + i)
+        .chain(std::iter::once(start + 12))
+        .filter(|n| (lo..=hi).contains(n))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +509,46 @@ mod tests {
             ["C", "G", "Am", "F"]
         );
         assert_eq!(bad, ["Zz"]);
+    }
+
+    fn name(notes: &[u8]) -> Option<String> {
+        identify(notes).map(|c| c.symbol())
+    }
+
+    #[test]
+    fn identifies_chords() {
+        assert_eq!(name(&[60, 64, 67]).as_deref(), Some("C"));
+        assert_eq!(name(&[64, 67, 72]).as_deref(), Some("C/E"));
+        assert_eq!(name(&[55, 60, 64]).as_deref(), Some("C/G"));
+        assert_eq!(name(&[57, 60, 64]).as_deref(), Some("Am"));
+        assert_eq!(name(&[60, 64, 67, 70]).as_deref(), Some("C7"));
+        assert_eq!(name(&[60, 64, 70]).as_deref(), Some("C7")); // no fifth
+        assert_eq!(name(&[62, 65, 69, 72]).as_deref(), Some("Dm7"));
+        assert_eq!(name(&[60, 67]).as_deref(), Some("C5"));
+        assert_eq!(name(&[48, 60, 64, 67, 76]).as_deref(), Some("C")); // doubled notes
+        // Same notes, bass decides: A C E G with A at the bottom is Am7, not C6/A.
+        assert_eq!(name(&[57, 60, 64, 67]).as_deref(), Some("Am7"));
+        assert_eq!(name(&[60, 64, 67, 69]).as_deref(), Some("C6"));
+    }
+
+    #[test]
+    fn not_chords() {
+        assert_eq!(name(&[60]), None);
+        assert_eq!(name(&[60, 72]), None);
+        assert_eq!(name(&[60, 61, 62]), None);
+        assert_eq!(name(&[]), None);
+    }
+
+    #[test]
+    fn scales() {
+        let major = &SCALES[0];
+        assert_eq!(
+            scale_notes(0, major, 60, KEYS61, false),
+            vec![60, 62, 64, 65, 67, 69, 71, 72]
+        );
+        // A minor pentatonic across a 61-key keyboard: 5 notes per octave, all in range.
+        let pent = scale_notes(9, &SCALES[5], 60, KEYS61, true);
+        assert!(pent.iter().all(|n| [9, 0, 2, 4, 7].contains(&(n % 12))));
+        assert_eq!(pent.len(), 26);
     }
 }
