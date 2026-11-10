@@ -25,7 +25,8 @@ pub struct ChordPage {
     /// MIDI note of the C the chord is built from (60 = middle C).
     pub base: u8,
     pub keys88: bool,
-    pub lights: bool,
+    /// Light the selection on the real keyboard, on every tab.
+    pub enabled: bool,
     pub prog_text: String,
     prog: Vec<Chord>,
     bad: Vec<String>,
@@ -33,7 +34,7 @@ pub struct ChordPage {
 }
 
 impl ChordPage {
-    pub fn new(prog_text: String, base: u8, keys88: bool, lights: bool) -> Self {
+    pub fn new(prog_text: String, base: u8, keys88: bool, enabled: bool) -> Self {
         let mut p = ChordPage {
             mode: Mode::Chord,
             chord: Chord::new(0, 0),
@@ -41,7 +42,7 @@ impl ChordPage {
             whole_keyboard: false,
             base,
             keys88,
-            lights,
+            enabled,
             prog_text,
             prog: Vec::new(),
             bad: Vec::new(),
@@ -64,6 +65,18 @@ impl ChordPage {
                 self.base,
                 self.range(),
                 self.whole_keyboard,
+            ),
+        }
+    }
+
+    /// Short name of what's selected, e.g. "Am7" or "C Major".
+    pub fn title(&self) -> String {
+        match self.mode {
+            Mode::Chord => self.chord.symbol(),
+            Mode::Scale => format!(
+                "{} {}",
+                NOTE_NAMES[self.chord.root as usize],
+                SCALES[self.scale.min(SCALES.len() - 1)].name
             ),
         }
     }
@@ -159,7 +172,9 @@ impl ChordPage {
                         ui.weak(names.join("  "));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.checkbox(&mut self.lights, "Light up keys");
+                        ui.checkbox(&mut self.enabled, "Enabled").on_hover_text(
+                            "Light these keys on the keyboard. Stays on when you switch tabs.",
+                        );
                         if !connected {
                             ui.weak("Not connected");
                         }

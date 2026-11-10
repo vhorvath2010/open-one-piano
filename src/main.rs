@@ -81,7 +81,7 @@ impl App {
             get("progression").unwrap_or_else(|| "C G Am F".into()),
             get("chord_base").and_then(|v| v.parse().ok()).unwrap_or(60),
             get("keys88").is_some_and(|v| v == "true"),
-            get("chord_lights").is_none_or(|v| v == "true"),
+            get("highlight_enabled").is_some_and(|v| v == "true"),
         );
         if get("highlight_mode").as_deref() == Some("scale") {
             chords.mode = Mode::Scale;
@@ -233,27 +233,26 @@ impl App {
             .collect()
     }
 
-    /// Light the current chord's keys while the Chords tab is open; otherwise keep them dark.
+    /// Light the current highlight's keys whenever highlighting is enabled, on any tab.
     fn sync_lights(&mut self) {
-        let want: Vec<(u8, LightColor)> =
-            if self.connected() && self.tab == Tab::Chords && self.chords.lights {
-                self.chords
-                    .notes()
-                    .into_iter()
-                    .map(|n| {
-                        (
-                            n,
-                            if self.chords.chord.is_root(n) {
-                                LightColor::Blue
-                            } else {
-                                LightColor::Red
-                            },
-                        )
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let want: Vec<(u8, LightColor)> = if self.connected() && self.chords.enabled {
+            self.chords
+                .notes()
+                .into_iter()
+                .map(|n| {
+                    (
+                        n,
+                        if self.chords.chord.is_root(n) {
+                            LightColor::Blue
+                        } else {
+                            LightColor::Red
+                        },
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         if want != self.sent_lights && self.connected() {
             self.send(Command::Lights(want.clone()));
             self.sent_lights = want;
@@ -378,6 +377,13 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.tab = tab;
+                    }
+                }
+                if self.chords.enabled && self.tab != Tab::Chords {
+                    ui.add_space(8.0);
+                    ui.weak(format!("Highlighting {}", self.chords.title()));
+                    if ui.small_button("Turn off").clicked() {
+                        self.chords.enabled = false;
                     }
                 }
             });
@@ -550,6 +556,10 @@ impl eframe::App for App {
         eframe::set_value(storage, "progression", &self.chords.prog_text);
         eframe::set_value(storage, "chord_base", &self.chords.base.to_string());
         eframe::set_value(storage, "keys88", &self.chords.keys88.to_string());
-        eframe::set_value(storage, "chord_lights", &self.chords.lights.to_string());
+        eframe::set_value(
+            storage,
+            "highlight_enabled",
+            &self.chords.enabled.to_string(),
+        );
     }
 }
