@@ -1,6 +1,6 @@
 [package]
 name = "open-one-piano"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Change the tone of a The ONE Smart Piano / Light Keyboard light up chords and scales on its keys, and name the chords you play, over Bluetooth"
 license = "MIT"
