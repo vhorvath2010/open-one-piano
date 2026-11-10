@@ -4,3 +4,4 @@ pub mod ble;
 pub mod chords;
 pub mod protocol;
 pub mod tones;
+pub mod update;
