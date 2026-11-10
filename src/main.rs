@@ -18,7 +18,11 @@ fn main() -> eframe::Result {
             .with_title("Open ONE Piano")
             .with_app_id("open-one-piano")
             .with_inner_size([780.0, 580.0])
-            .with_min_inner_size([560.0, 400.0]),
+            .with_min_inner_size([560.0, 400.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+                    .expect("bundled icon is a valid PNG"),
+            ),
         ..Default::default()
     };
     eframe::run_native(

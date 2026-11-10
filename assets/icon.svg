@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Open ONE Piano: a row of keys where the last one lifts free, lit up. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c3858"/>
+      <stop offset="1" stop-color="#141927"/>
+    </linearGradient>
+    <linearGradient id="lit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6ea2ff"/>
+      <stop offset="1" stop-color="#3f74dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- three white keys -->
+  <rect x="30"  y="92" width="44" height="130" rx="10" fill="#f4f5f8"/>
+  <rect x="80"  y="92" width="44" height="130" rx="10" fill="#f4f5f8"/>
+  <rect x="130" y="92" width="44" height="130" rx="10" fill="#f4f5f8"/>
+  <!-- black keys -->
+  <rect x="61"  y="92" width="32" height="76" rx="7" fill="#141927"/>
+  <rect x="111" y="92" width="32" height="76" rx="7" fill="#141927"/>
+  <!-- the freed key: lifted, tilted, glowing -->
+  <rect x="180" y="92" width="44" height="130" rx="10" fill="url(#lit)"
+        transform="translate(2 -30) rotate(12 180 222)"/>
+</svg>
