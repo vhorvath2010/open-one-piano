@@ -2,6 +2,7 @@
 
 mod chord_page;
 mod live_page;
+mod updater;
 
 use chord_page::{ChordPage, Mode};
 use eframe::egui;
@@ -11,6 +12,7 @@ use open_one_piano::protocol::{LightColor, Tone};
 use open_one_piano::tones::{self, Entry};
 use std::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
+use updater::Updater;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -71,6 +73,7 @@ struct App {
     live: LivePage,
     /// Lights last sent to the keyboard, so we only send changes.
     sent_lights: Vec<(u8, LightColor)>,
+    updater: Updater,
 }
 
 impl App {
@@ -92,6 +95,8 @@ impl App {
         }
         chords.scale = get("scale").and_then(|v| v.parse().ok()).unwrap_or(0);
         chords.whole_keyboard = get("whole_keyboard").is_some_and(|v| v == "true");
+        let mut updater = Updater::new();
+        updater.check(&cc.egui_ctx, false);
         Self {
             cmd,
             events: ev_rx,
@@ -115,6 +120,7 @@ impl App {
             chords,
             live: LivePage::new(get("use_pedal").is_none_or(|v| v == "true")),
             sent_lights: Vec::new(),
+            updater,
         }
     }
 
@@ -365,6 +371,7 @@ impl eframe::App for App {
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
             self.top_bar(ui);
+            self.updater.banner(ui);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 for (tab, label) in [
@@ -390,6 +397,9 @@ impl eframe::App for App {
                         self.chords.enabled = false;
                     }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.updater.version_button(ui);
+                });
             });
             ui.add_space(4.0);
         });
@@ -526,6 +536,10 @@ impl eframe::App for App {
         if let Some(t) = apply {
             self.apply(t);
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.updater.relaunch_if_requested();
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
