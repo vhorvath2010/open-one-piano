@@ -66,6 +66,10 @@ cargo run --release
 
 On Linux, install the D-Bus and GL headers first (Debian/Ubuntu: `sudo apt install libdbus-1-dev pkg-config libxkbcommon-dev libgl1-mesa-dev`).
 
+## Releasing
+
+Bump `version` in `Cargo.toml` and merge to `main`. CI builds every platform and, if there's no release for that version yet, tags `v<version>` and publishes it. The app's update check picks it up from there. Pushes that don't change the version don't release anything.
+
 ## How it works
 
 The keyboard speaks standard Bluetooth LE MIDI plus a few of its own SysEx commands for things like choosing the tone. [PROTOCOL.md](PROTOCOL.md) documents them, in case you want to control the keyboard from your own code.
